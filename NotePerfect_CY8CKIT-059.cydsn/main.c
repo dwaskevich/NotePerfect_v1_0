@@ -96,6 +96,11 @@
 #define LED_OFF     (0u)
 #define LED_ON      (1u)
 
+/* control register masks */
+#define BLUE_CTRL   (0x01)
+#define RED_CTRL    (0x02)
+#define GREEN_CTRL  (0x04)
+
 /* NotePerfect step number lookup table */
 uint16_t PWM_Lookup[] = {0, 83, 167, 250, 333, 417, 500, 583, 667, 750, 833, 917, 1000,
                             1083, 1167, 1250, 1333, 1417, 1500, 1583, 1667, 1750, 1833, 1917, 2000,
@@ -138,11 +143,13 @@ int main(void)
     char displayStr[15] = {'\0'};
     
     uint8_t previousButton0 = OFF, previousButton1 = OFF, previousButton2 = OFF;
+    uint8_t inputChannel = IN_A;
 
     CYGlobalIntEnable;
     
     VDAC8_Start();
     Opamp_1_Start();
+    PWM_Red_Start(); /* start IN_A PWM */
     
     /* Start capsense and initialize baselines and enable scan */
     CapSense_Start();
@@ -185,7 +192,6 @@ int main(void)
     
     /* initialize indicator LEDs */
     LED3_Write(LED_ON);
-    Red_Write(LED_ON);
     
     /* start and initialize Analog input Mux to IN_A as the source */
     myMux_Start();
@@ -204,10 +210,14 @@ int main(void)
             {
                 if(previousButton0 == OFF)
                 {
-                    Red_Write(LED_ON);
-                    Green_Write(LED_OFF);
-                    
                     myMux_FastSelect(IN_A); /* select IN_A as input source */
+                    inputChannel = IN_A;
+                    /* start Red LED pwm and stop Green */
+                    PWM_Red_Start();
+                    Control_Reg_Write((Control_Reg_Read() | GREEN_CTRL));
+                    PWM_Green_Stop();
+                    Control_Reg_Write((Control_Reg_Read() & ~GREEN_CTRL));
+                    /* update LCD */
                     LCD_Position(0,0);
                     LCD_PrintString("In A");
 
@@ -223,10 +233,14 @@ int main(void)
             {
                 if(previousButton1 == OFF)
                 {
-                    Red_Write(LED_OFF);
-                    Green_Write(LED_ON);
-                    
                     myMux_FastSelect(IN_B); /* select IN_B as input source */
+                    inputChannel = IN_B;
+                    /* start Green LED pwm and stop Red */
+                    PWM_Green_Start();
+                    Control_Reg_Write((Control_Reg_Read() | RED_CTRL));
+                    PWM_Red_Stop();
+                    Control_Reg_Write((Control_Reg_Read() & ~RED_CTRL));
+                    /* update LCD */
                     LCD_Position(0,0);
                     LCD_PrintString("In B");
                     
@@ -242,8 +256,6 @@ int main(void)
             {
                 if(previousButton2 == OFF)
                 {
-//                    Blue_Write(~Blue_Read());
-                    
                     previousButton2 = ON;
                 }
             }
@@ -308,6 +320,22 @@ int main(void)
         {
             PWM_WriteCompare(PWM_Lookup[notePerfectValue]); /* lookup PWM compare value and update PWM */
             
+            /* front-panel LED housekeeping */
+            if(IN_A == inputChannel)
+            {
+                if(0 == notePerfectValue) /* don't let indicator LED go all the way off (i.e. PWM to zero) */
+                    PWM_Red_WriteCompare(PWM_Lookup[1]);
+                else
+                    PWM_Red_WriteCompare(PWM_Lookup[notePerfectValue]); /* LED brightness follows input voltage */
+            }
+            else if(IN_B == inputChannel)
+            {
+                if(0 == notePerfectValue) /* don't let indicator LED go all the way off (i.e. PWM to zero) */
+                    PWM_Green_WriteCompare(PWM_Lookup[1]);
+                else
+                    PWM_Green_WriteCompare(PWM_Lookup[notePerfectValue]); /* LED brightness follows input voltage */
+            }
+            
             /* display housekeeping */
             sprintf(displayStr, "%4d", PWM_Lookup[notePerfectValue]);
             LCD_Position(1,12);
@@ -330,11 +358,18 @@ int main(void)
         if((uint32_t) milliVolts > PWM_Lookup[notePerfectValue] + CORRECTION_WINDOW || //
                             (uint32_t) milliVolts < PWM_Lookup[notePerfectValue] - CORRECTION_WINDOW)
         {
-            Blue_Write(LED_ON);
-            
+            if(notePerfectValue > 10) /* limit Blue LED brightness to step 10 value (arbitrary) */
+                PWM_Blue_WriteCompare(PWM_Lookup[10]);
+            else PWM_Blue_WriteCompare(PWM_Lookup[notePerfectValue]); /* Blue LED brightness follows input voltage */
+            PWM_Blue_Start(); /* Blue LED indicates correction has been applied */
         }
-        else Blue_Write(LED_OFF);
-        
+        else
+        {
+            /* Fixed-function PWMs hold value when stopped, so reset first then stop */
+            Control_Reg_Write((Control_Reg_Read() | BLUE_CTRL));
+            PWM_Blue_Stop();
+            Control_Reg_Write((Control_Reg_Read() & ~BLUE_CTRL));
+        }
     }
 }
 
