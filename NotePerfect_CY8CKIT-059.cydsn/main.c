@@ -1,62 +1,62 @@
 ﻿/******************************************************************************
-* File Name: Main.c
+* File Name: main.c
 *
-* Version 1.1
+* Version 1.0
 *
 * Description:
-* This file contains the main function for the voltage Display test.
+* This file contains the main function for the NotePerfect control voltage
+* quantizer. 
 *
-* Note:
+* Code tested with PSoC Creator: 4.3
+* Device tested with CY8C5888LTI-LP097 (CY8CKIT-059 Prototyping Kit)
+* Compiler: ARMGCC 5.4-2016-q2-update
 *
-* Code tested with:
-* PSoC Creator: 3.0
-* Device Tested With: CY8C5868AXI-LP035
-* Compiler    : ARMGCC 4.4.1, ARM RVDS Generic, ARM MDK Generic
-*
-********************************************************************************
-* Copyright (2013), Cypress Semiconductor Corporation. All Rights Reserved.
-********************************************************************************
-* This software is owned by Cypress Semiconductor Corporation (Cypress)
-* and is protected by and subject to worldwide patent protection (United
-* States and foreign), United States copyright laws and international treaty
-* provisions. Cypress hereby grants to licensee a personal, non-exclusive,
-* non-transferable license to copy, use, modify, create derivative works of,
-* and compile the Cypress Source Code and derivative works for the sole
-* purpose of creating custom software in support of licensee product to be
-* used only in conjunction with a Cypress integrated circuit as specified in
-* the applicable agreement. Any reproduction, modification, translation,
-* compilation, or representation of this software except as specified above 
-* is prohibited without the express written permission of Cypress.
-*
-* Disclaimer: CYPRESS MAKES NO WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, WITH 
-* REGARD TO THIS MATERIAL, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED 
-* WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
-* Cypress reserves the right to make changes without further notice to the 
-* materials described herein. Cypress does not assume any liability arising out 
-* of the application or use of any product or circuit described herein. Cypress 
-* does not authorize its products for use as critical components in life-support 
-* systems where a malfunction or failure may reasonably be expected to result in 
-* significant injury to the user. The inclusion of Cypress' product in a life-
-* support systems application implies that the manufacturer assumes all risk of 
-* such use and in doing so indemnifies Cypress against all charges. 
-*
-* Use of this Software may be limited by and subject to the applicable Cypress
-* software license agreement. 
 *******************************************************************************/
 
 /******************************************************************************
 *                           THEORY OF OPERATION
-* This project demonstrates how ADC is used to read the input voltage at 
-* it's input and display it on the LCD.
-* 
-* The Potentiometer is connected to the input of the DelSig ADC. ADC is 
-* configured with 20 bit of resolution to measure the input voltage with 
-* higher accuracy. Moving average filter of 128 samples is applied to the ADC
-* conversion result before displaying the result in micro volts on the LCD. 
 *
-* Hardware connection on the Kit
-* Potentiometer - PORT 6[5] 
-* LCD - PORT 2[0..6]
+* This project takes an analog Control Voltage input, digitizes it with a
+* 20-bit delta-sigma ADC and then outputs the closest 1/12th note CV via
+* RC-filtered PWM. Filtered PWM output is buffered with an internal opamp.
+*
+* LCD is managed with a community-supplied component (from MEH ... Mark
+* Hastings) to limit pin count and enable non-adjacent GPIOs:
+* https://community.infineon.com/t5/PSoC-Creator-Designer/Character-LCD-mp-Multi-Port/td-p/242544
+* LCD contrast is controlled via VDAC+opamp connected to P0.1.
+*
+* This project is based on the PSoC 5LP code example for the DelSigADC:
+* C:\Program Files (x86)\Cypress\PSoC 5LP Development Kit\1.0\Firmware\VoltageDisplay_DelSigADC
+* The DelSigADC is configured for 20-bit resolution to measure the input
+* voltage with high accuracy. A moving-average filter of 128 samples is
+* applied to the ADC conversion before using the result in NotePerfect
+* calculations and displaying the result (in micro volts) on the LCD.
+*
+* NotePerfect output voltages are determined by calculating the nearest
+* "step" (0V - 5V) and then using the step number as an index into a lookup 
+* table for PWM compare values. Full-scale voltage, number of notes per
+* volt and correction window are determined by #defines at the top of
+* main.c.
+* 
+* There are two input channels (In_A and In_B) seleced via Analog Mux
+* using front-panel CapSense touch buttons:
+* 1. In_A -> 1/8" TS jack on front panel
+* 2. In_B -> 3-pin .1" DuPont female header on side (for potentiometer)
+*  -> Note - potentiometer input is primarily for testing and calibration.
+*
+* Quantized output voltage is available from 1/8" TS jack on front panel.
+*
+* A tri-color LED indicates what's happening:
+*  - Red indicates In_A is active. Intensity corresponds to incoming
+*    voltage level.
+*  - Green indicates In_B is active. Intensity corresponds to incoming
+*    voltage level.
+*  - Blue indicates a correction is being applied to the incoming voltage.
+*
+* Three CapSense buttons on the front panel control/select which input
+* is active (In_A or In_B), Misc button is for future use.
+* 
+* 
 *******************************************************************************/
 #include <device.h>
 #include "stdio.h"
@@ -142,7 +142,8 @@ int main(void)
     /* Character array to hold the micro volts*/
     char displayStr[15] = {'\0'};
     
-    uint8_t previousButton0 = OFF, previousButton1 = OFF, previousButton2 = OFF;
+    uint8_t previousButton0 = OFF, previousButton1 = OFF;
+//    uint8_t previousButton2 = OFF;
     uint8_t inputChannel = IN_A;
 
     CYGlobalIntEnable;
@@ -252,17 +253,24 @@ int main(void)
                 previousButton1 = OFF;
             }
             
+            /* future use ... for demo only */
             if(CapSense_CheckIsWidgetActive(CapSense_BUTTON2__BTN))
             {
-                if(previousButton2 == OFF)
-                {
-                    previousButton2 = ON;
-                }
+                PWM_Blue_WriteCompare(5000); /* arbitrary action for demo purpose */
+                PWM_Blue_Start();
+                PWM_Red_WriteCompare(0);
+                PWM_Green_WriteCompare(0);
             }
-            else
-            {
-                previousButton2 = OFF;
-            }
+//                
+//                if(previousButton2 == OFF)
+//                {
+//                    previousButton2 = ON;
+//                }
+//            }
+//            else
+//            {
+//                previousButton2 = OFF;
+//            }
                 
             CapSense_ScanEnabledWidgets();
         }
